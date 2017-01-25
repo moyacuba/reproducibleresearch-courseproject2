@@ -1,0 +1,234 @@
+---
+title: "NOAA Storm Database Exploratory Analysis"
+author: "Iosvany Moya"
+date: "January 25, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis 
+
+Weather events can cause serios damages to the population and the economy. In order to assign resources to address those threats, an analysis regarding wich type of events can cause more or less damage to the economy and the population, could be very handy for goverment administration. Below is the Data Analisys that takes the "NOAA Storm Database" from its raw source and transform the information to build two charts with the evidence required to address two main questions: 1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health? and 2. Across the United States, which types of events have the greatest economic consequences?
+
+## Data Processing
+
+Below you can read how the transformation of the raw data is address. Basically it consist in four section:
+
+- Basic setup for data
+- Data Exploration
+- Data refactorization
+- Results
+
+### Basic setup for data: Loading utility libraries
+
+Load utility libraries. The "dplyr" and "reshape2" libraries will help in the data manipulation and flow. The "ggplot2" is useful for creating graphs. 
+
+```{r libraries, warning=FALSE, message=FALSE}
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+```
+
+### Basic setup for data: Routines to download the database from internet to a local file.
+
+```{r Download database chunk, cache=TRUE}
+dataurl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+filename <- "./repdata_data_StormData.csv.bz2"
+download.file(dataurl, filename)
+```
+### Basic setup for data: Routines to load the csv file into memory for later analysis.
+
+Read the file "repdata_data_StormData.csv.bz2" into the "sdata" variable, then describe the variable to check the read data shape:
+
+```{r Read data chunk, cache=TRUE}
+sdata <- read.csv(filename, na.strings="NA", stringsAsFactors = FALSE)
+str(sdata)
+```
+
+### Data Exploration
+
+Explore data to show the data quality and shape in the raw data already read. This will evidence the transformation applied later in order to create the structure appropiated for the analysis regarding the main questions to address in the result section.
+
+Human harmful evidences will be address by the columns "FATALITIES" and "INJURIES"
+
+```{r Fatalities and Injuries data exploration}
+summary(sdata$FATALITIES)
+summary(sdata$INJURIES)
+```
+
+The cost evidence will be addres by the damage estimated, for more details you can read the section "2.7 Damage" in the live <a href="https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf">documentation</a>. The properties damage is represented in two columns, "PROPDMG" and "PROPDMGEXP". The first columns contains a three digit number, and the second column contains a character coding the signifying of the first column. The Crop damage is represented in another two columns, "CROPDMG" and "CROPDMGEXP", these two columns share the same contract as the previously explained regarding properties damage.
+
+```{r Damage values exploration}
+summary(sdata$PROPDMG)
+summary(sdata$CROPDMG)
+```
+Eventually the three digits rule does not always apply, check the Max from the summary results, but it doesn´t interfeer with the analysis.
+
+Checking the possible values in the EXP columns, printing unique values will list all values used in the database:
+```{r Damage Exponent exploration}
+unique(sdata$PROPDMGEXP)
+unique(sdata$CROPDMGEXP)
+```
+As observed, the data contains some typos, uppercase vs lowercase and blank data. A refactoring is required in orde to normalize the information.
+
+Finally the events are coded in the column EVTYPE, but there is a lot of different descript for the same kind of event.
+
+```{r Event Types exploration}
+head(unique(sdata$EVTYPE), 30)
+# Check the total different types in the raw data
+length(unique(sdata$EVTYPE))
+```
+
+### Data refactorization
+
+The refactoring routines converts the characters in the power of 10 equivalent and multiply the damage value:
+
+```{r Damage measurement Refactoring}
+# calculate property damage 
+# Check if a number, assign the power of 10 for that otherwise check for 
+# (h)undres, (k)ilo, (m)illions and (b)illions
+sdata$Property_Damage <- sdata$PROPDMG * 
+                            ifelse(grepl("[0-9]", sdata$PROPDMGEXP), 10^as.numeric(sdata$PROPDMGEXP), 
+                            ifelse(grepl("h", sdata$PROPDMGEXP, ignore.case = TRUE),10^2,
+                            ifelse(grepl("k", sdata$PROPDMGEXP, ignore.case = TRUE),10^3,
+                            ifelse(grepl("m", sdata$PROPDMGEXP, ignore.case = TRUE),10^6,
+                            ifelse(grepl("b", sdata$PROPDMGEXP, ignore.case = TRUE),10^9,
+                            1)))))
+# Check NAs incidence by the previous warning
+sum(is.na(sdata$Property_Damage))
+# calculate crop damage 
+# Check if a number, assign the power of 10 for that otherwise check for 
+# (h)undres, (k)ilo, (m)illions and (b)illions
+sdata$Crop_Damage <- sdata$CROPDMG * 
+                            ifelse(grepl("[0-9]", sdata$CROPDMGEXP), 10^as.numeric(sdata$CROPDMGEXP), 
+                            ifelse(grepl("h", sdata$CROPDMGEXP, ignore.case = TRUE),10^2,
+                            ifelse(grepl("k", sdata$CROPDMGEXP, ignore.case = TRUE),10^3,
+                            ifelse(grepl("m", sdata$CROPDMGEXP, ignore.case = TRUE),10^6,
+                            ifelse(grepl("b", sdata$CROPDMGEXP, ignore.case = TRUE),10^9,
+                            1)))))
+# Check NAs incidence by the previous warning
+sum(is.na(sdata$Crop_Damage))
+
+sdata$Damage <- sdata$Crop_Damage+sdata$Property_Damage
+```
+
+Finally the event types have to be grouped, the technique will use regular expression to recognize patterns from the event type description and assign a label acordingly.
+
+```{r Event types refactoring}
+sdata$EVTYPE <- gsub('.*STORM.*', 'STORM', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*LIGHTNING.*', 'STORM', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*LIGHTING.*', 'STORM', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*LIGNTNING.*', 'STORM', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*TURBULENCE.*', 'STORM', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FLOOD.*', 'FLOOD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WIND.*', 'WIND', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*TORN.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WALL CLOUD.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FUNNEL.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*DUST DEVIL.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*MICROBURST.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*DOWNBURST.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*GUSTNADO.*', 'TORNADO', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*HAIL.*', 'HAIL', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*HURRICANE.*', 'HURRICANE', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*RAIN.*', 'RAIN', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*PRECIP.*', 'RAIN', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*SLEET.*', 'RAIN', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*URBAN.*SMALL.*', 'RAIN', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*SMALL.*STREAM.*', 'RAIN', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*SNOW.*', 'SNOW', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*BLIZZ.*', 'SNOW', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*COLD.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FREEZ.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WINTRY.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*RECORD LOW.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*LOW.*TEMPER.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FROST.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WINTER.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*ICE.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*ICY.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*COOL.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FOG.*', 'COLD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*HIGH.*TEMPER.*', 'HEAT', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*HEAT.*', 'HEAT', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*RECORD WARMTH.*', 'HEAT', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*RECORD HIGH.*', 'HEAT', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*FIRE.*', 'FIRE', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*SEAS.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WATER.*SPOUT.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('WAYTERSPOUT', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*SURF.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*MARINE.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*TIDES.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*WAVES.*', 'SEAS', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*RIP CURRENT.*', 'FLOOD', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*DROUGHT.*', 'DRY', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*DRY.*', 'DRY', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*MUD.*SLIDE.*', 'MUDFLOW', sdata$EVTYPE)
+sdata$EVTYPE <- gsub('.*AVALANCE.*', 'MUDFLOW', sdata$EVTYPE)
+
+sdata$EVTYPE <- ifelse(grepl("STORM", sdata$EVTYPE, ignore.case = TRUE),'STORM',
+                ifelse(grepl("FLOOD", sdata$EVTYPE, ignore.case = TRUE),'FLOOD',
+                ifelse(grepl("WIND", sdata$EVTYPE, ignore.case = TRUE),'WIND',
+                ifelse(grepl("TORNADO", sdata$EVTYPE, ignore.case = TRUE),'TORNADO',
+                ifelse(grepl("HAIL", sdata$EVTYPE, ignore.case = TRUE),'HAIL',
+                ifelse(grepl("HURRICANE", sdata$EVTYPE, ignore.case = TRUE),'HURRICANE',
+                ifelse(grepl("RAIN", sdata$EVTYPE, ignore.case = TRUE),'RAIN',
+                ifelse(grepl("SNOW", sdata$EVTYPE, ignore.case = TRUE),'SNOW',
+                ifelse(grepl("COLD", sdata$EVTYPE, ignore.case = TRUE),'COLD',
+                ifelse(grepl("HEAT", sdata$EVTYPE, ignore.case = TRUE),'HEAT',
+                ifelse(grepl("FIRE", sdata$EVTYPE, ignore.case = TRUE),'FIRE',
+                ifelse(grepl("SEAS", sdata$EVTYPE, ignore.case = TRUE),'SEAS',
+                ifelse(grepl("DRY", sdata$EVTYPE, ignore.case = TRUE),'DRY',
+                ifelse(grepl("MUDFLOW", sdata$EVTYPE, ignore.case = TRUE),'MUDFLOW',
+                'OTHERS'))))))))))))))
+# Check the total different types in the raw data
+length(unique(sdata$EVTYPE))
+```
+Now creating the resume version for each column sets:
+
+
+```{r Graph refactorization}
+# Melting data for damage
+damageResume <- sdata%>% select(EVTYPE, Property_Damage, Crop_Damage, Damage) %>% group_by(EVTYPE) %>% summarise_each(funs(sum)) %>% arrange(desc(Damage))
+damageMelt  <- melt(damageResume[,1:3], id.vars="EVTYPE")
+damageMelt$variable <- ifelse(damageMelt$variable=="Property_Damage", "Property Damage", "Crop Damage")
+damageMelt$EVTYPE <- factor(damageMelt$EVTYPE, levels = damageResume$EVTYPE)
+# Melting data for harmful to population
+sdata$Harmful <- sdata$INJURIES+sdata$FATALITIES
+harmfulResume <- sdata%>% select(EVTYPE, INJURIES, FATALITIES, Harmful) %>% group_by(EVTYPE) %>% summarise_each(funs(sum)) %>% arrange(desc(Harmful))
+harmfulMelt  <- melt(harmfulResume[,1:3], id.vars="EVTYPE")
+harmfulMelt$variable <- ifelse(harmfulMelt$variable=="INJURIES", "Injuries", "Fatalities")
+harmfulMelt$EVTYPE <- factor(harmfulMelt$EVTYPE, levels = harmfulResume$EVTYPE)
+```
+
+### Results
+
+#### About question #1:
+Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+##### Answer
+
+```{r Answer Q1}
+ggplot(harmfulMelt, aes(EVTYPE, value))+
+  geom_bar(aes(fill=variable), stat="identity")+
+  labs(title="Weather Events Harmful to Population", x="", y="Injuries and Fatalities")+
+  theme(axis.text.x = element_text(angle=45, hjust=1, size=12), legend.title=element_blank())
+```
+
+In the above chart, we can notice the evidence that TORNADO related events are the most harmlful for population. Then with significantly less insidence, STORM, HEAT, FLOOD and WIND related events are the next 4 most harmlful events to population.
+
+#### About question #1:
+Across the United States, which types of events have the greatest economic consequences?
+##### Answer
+```{r Answer Q2}
+ggplot(damageMelt, aes(EVTYPE, value))+
+  geom_bar(aes(fill=variable), stat="identity")+
+  labs(title="Weather Events Damages", x="", y="Property damages and Crop Damages")+
+  theme(axis.text.x = element_text(angle=45, hjust=1, size=12), legend.title=element_blank())
+```
+
+In the above chart, we can notice the evidence that FLOOD related events causes the most amout of damage to the economy. Then with significantly less insidence, HURRICANE, STORM and TORNADO related events are the next 3 types of events that causes more significant amount of economic damages.
